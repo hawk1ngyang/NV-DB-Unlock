@@ -5,8 +5,8 @@ title: "[机型] 品牌 型号 - 结果"
 labels: compatibility
 ---
 
-**品牌 / 机型 / Model**：例如 ASUS ROG Strix SCAR 16 2023 (G634JZ)、Lenovo Legion Pro 7 16IRX9H
-**CPU / GPU**：例如 i9-13980HX / RTX 4080 Laptop
+**品牌 / 机型 / Model**：
+**CPU / GPU**：
 **BIOS 版本**：
 **显卡驱动版本**：
 

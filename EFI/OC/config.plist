@@ -16,7 +16,7 @@
 				<key>BaseSkip</key>
 				<integer>0</integer>
 				<key>Comment</key>
-				<string>[1/2] NVPCF TPP: "TPPA = &lt;NameSeg&gt;" -&gt; "TPPA = 0x0800" (256W). e.g. ASUS: TPPA = ATPP</string>
+				<string>[1/2] NVPCF TPP: "TPPA = &lt;NameSeg&gt;" -&gt; "TPPA = 0x0800" (256W)</string>
 				<key>Count</key>
 				<integer>0</integer>
 				<key>Enabled</key>

@@ -78,7 +78,7 @@ function Dump-Acpi([string]$target) {
 }
 
 # Classify every "TPPA" store found in DSDT/SSDTs.
-#   Name    : 70 <NameSeg> 'TPPA'           (e.g. ASUS: TPPA = ATPP)
+#   Name    : 70 <NameSeg> 'TPPA'           (TPPA = <variable>)
 #   Word    : 70 0B xx xx 'TPPA'            (TPPA = constant)
 #   Patched : 70 0B 00 08 'TPPA'            (0x0800 = 256W; 0x0400 from v1.0 also accepted)
 #   Field   : 8B .. 0A 19 'TPPA'            (CreateWordField(buf, 0x19, TPPA) -> TPP offset field of NVPCF table)
