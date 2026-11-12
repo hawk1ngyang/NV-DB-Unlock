@@ -1,0 +1,7 @@
+oc_guid.txt
+bcd_backup*
+diag.txt
+scan/
+verify/
+*.dat
+*.dsl
