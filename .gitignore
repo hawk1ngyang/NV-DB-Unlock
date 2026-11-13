@@ -8,3 +8,5 @@ verify/
 acpi_export/
 acpi_for_issue.zip
 forced_without_restore_point.txt
+keys_private/
+EFI/OC/keys/

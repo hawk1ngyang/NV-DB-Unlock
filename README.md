@@ -47,7 +47,7 @@ CPU 实际功耗仍由厂商控制软件的 PL1/PL2、温度墙和适配器决�
 |---|---|
 | 显卡 | RTX 30 / 40 / 50 系笔记本独显，且厂商 BIOS 开启了 Dynamic Boost 2.0 |
 | CPU | Intel 或 AMD 均可（本补丁不修改 CPU 设置） |
-| 系统 | Windows 10 / 11 64 位，UEFI 启动，关闭安全启动 |
+| 系统 | Windows 10 / 11 64 位，UEFI 启动；默认需关闭安全启动（也可用下文的[安全启动模式](#安全启动模式可选)） |
 | 显卡驱动 | 使用驱动自带的配套 NVPCF，不要单独替换 |
 
 不适用：RTX 20 / GTX 16 / MX 系列、无独显笔记本、台式机（没有 Dynamic Boost 2.0）。
@@ -58,7 +58,7 @@ CPU 实际功耗仍由厂商控制软件的 PL1/PL2、温度墙和适配器决�
 
 | 输出 | 含义 |
 |---|---|
-| `COMPATIBLE` | 找到唯一一处 TPP 赋值，且确认它就是 NVPCF 表中偏移 0x19 的 TPP 字段，可以安装 |
+| `COMPATIBLE` | 确认 TPP 赋值就是 NVPCF 表中偏移 0x19 的 TPP 字段：只有一处，或多处（按性能模式分支）但全部位于同一个 NVPCF 方法内，可以安装 |
 | `ALREADY PATCHED` | 本次开机已经打过补丁 |
 | `NOT SUPPORTED YET` | 有 NVPCF，但 BIOS 代码写法不同。运行 `4_export_acpi.bat`，把 `acpi_for_issue.zip` 发到 [Issue](../../issues/new?template=compatibility.md) |
 | `UNSURE` | 找到多处候选，为安全起见拒绝安装，同样请提交 ACPI 表 |
@@ -69,9 +69,9 @@ CPU 实际功耗仍由厂商控制软件的 PL1/PL2、温度墙和适配器决�
 ## 前置条件
 
 1. Windows 10/11，UEFI 启动。
-2. **关闭安全启动**：开机进 BIOS（常见按键 F2 / Del / F10，以你的机型为准）→ Security 或 Boot → Secure Boot → Disabled。
+2. **关闭安全启动**：开机进 BIOS（常见按键 F2 / Del / F10，以你的机型为准）→ Security 或 Boot → Secure Boot → Disabled。需要开着安全启动玩游戏的，装好后再看[安全启动模式](#安全启动模式可选)。
 3. 使用**与当前显卡驱动配套的 NVPCF**（不要单独换旧版 NVPCF，否则 Dynamic Boost 完全失效，单烤也只有基础功耗）。
-4. 如开启了 BitLocker，先准备好恢复密钥（aka.ms/myrecoverykey）。脚本会自动暂停保护，但以防万一。
+4. **必须关闭 BitLocker / 设备加密**，并等解密完成（设置 → 隐私和安全性 → 设备加密，或 控制面板 → BitLocker）。开着时安装脚本会直接拒绝：每次开机都经过 OpenCore，BitLocker 会认为启动链被改动而要求输入恢复密钥。
 5. **系统保护（还原点）**。安装和设为永久前，脚本都会先创建系统还原点，并读回确认确实创建成功。
    如果创建失败，建议先打开系统保护再重试：开始菜单搜索“创建还原点” → 选中 C 盘 → 配置 → 启用系统保护（建议 5%）→ 确定。
    确实无法开启时，脚本会列出风险并让你选择：**输入大写 `YES` 强制继续**，或任意其他输入取消（取消则不做任何修改）。
@@ -108,6 +108,7 @@ CPU 实际功耗仍由厂商控制软件的 PL1/PL2、温度墙和适配器决�
 | 2 | 重启 → `2_verify.bat` | 双击 | 开机经过 OpenCore（不显示菜单，直接进 Windows）。验证显示 `PATCHED` 即生效 |
 | 3 | 双烤测试 | — | 切到厂商控制软件的最高性能模式，FurMark + AIDA64 FPU，看显卡功耗 |
 | 4 | `3_make_permanent.bat` | **管理员** | 再建一个还原点后，设为永久默认启动 |
+| 可选 | `5_secure_boot.bat` | 双击（自动请求管理员） | 想开安全启动时用：生成本机密钥并给 OpenCore 签名，见[安全启动模式](#安全启动模式可选) |
 | 适配 | `4_export_acpi.bat` | 双击 | 不兼容时导出 ACPI 表，用于提 Issue |
 | 卸载 | `9_uninstall.bat` | **管理员** | 删除 OpenCore 与启动项，恢复原厂启动 |
 
@@ -131,10 +132,35 @@ OpenCore 默认**不显示启动菜单**，开机和原来一样直接进 Window
 
 排查问题时运行 `diag.bat`，把生成的 `diag.txt` 贴到 Issue。
 
+## 安全启动模式（可选）
+
+默认方案需要关闭安全启动。如果你玩的游戏要求开启安全启动（如部分 Vanguard / Battlefield 6），可以用**你自己的密钥**给 OpenCore 签名，再把证书加进 BIOS 的信任列表：
+
+1. 先按上面的步骤**在安全启动关闭的状态下**装好，确认 `0_check` 显示 `0x0800`。
+2. 运行 `5_secure_boot.bat`（自动请求管理员）。它会：
+   - 在本机生成一把**只属于这台电脑**的签名密钥（RSA-2048，存放在 Windows 证书存储中，**不可导出**，不会生成任何私钥文件）；
+   - 用它给 `OpenCore.efi` 签名，并同步到 EFI 分区；
+   - 导出公钥证书 `EFI\OC\keys\ISK.cer`。
+3. 把 `ISK.cer` 复制到一个 **FAT32 U 盘**。
+4. 重启进 BIOS → Secure Boot → **Key Management** → **Authorized Signatures (db)** → **Append（追加）** → 选 U 盘里的 `ISK.cer`（格式选 Public Key Certificate）。
+   > ⚠️ **只能选 Append / 追加**。选 Set / Update / Delete 会覆盖微软证书，导致 Windows 无法启动。
+   > 如果 Key Management 里显示没有任何密钥（Setup Mode），先选 **Install Default Secure Boot Keys** 再追加。
+5. **Secure Boot Control → Enabled**，F10 保存重启。
+6. 运行 `0_check`，看到 `patched 0x0800` 和 `Secure Boot: on-enrolled` 即成功。
+
+**进不了系统怎么办**：进 BIOS 把 Secure Boot 改回 Disabled 即恢复原状；若仍有问题，Key Management → **Restore Factory Keys**（恢复出厂密钥）。
+
+注意：
+- 每台电脑都要自己运行 `5_secure_boot.bat`，**不要使用别人生成的 `ISK.cer` 或签名过的 OpenCore**。
+- 证书加入 db 后，这台电脑的固件会信任用这把密钥签名的任何 EFI 程序。密钥只在本机、不可导出，但能以管理员身份控制你电脑的人理论上可以用它签名，请保持系统安全。
+- 以后更新本项目（OpenCore.efi 被替换）后，重新运行一次 `5_secure_boot.bat` 即可，会复用同一把密钥，不需要再进 BIOS。
+- 重装 Windows 后密钥丢失：先在 BIOS 关闭安全启动，重新安装并运行 `5_secure_boot.bat`，再追加新的 `ISK.cer`（旧证书可通过 Restore Factory Keys 清除）。
+- 开启安全启动后仍不能使用 BitLocker。
+
 ## 常见问题
 
 **会影响三角洲 / 瓦罗兰特等反作弊吗？**
-不开测试签名，Windows 看到的就是“原厂”ACPI 表。但需要关闭安全启动——要求安全启动的游戏（如部分 Vanguard / Battlefield 6 等）无法使用本方案。
+不开测试签名，Windows 看到的就是“原厂”ACPI 表。默认需要关闭安全启动；要求安全启动的游戏（如部分 Vanguard / Battlefield 6）请使用[安全启动模式](#安全启动模式可选)。反作弊将来是否检查信任列表里的自签名证书，无法保证。
 
 **弹出“BitLocker 无法启用 / 无法获取加密密钥”？**
 正常现象，不影响使用，C 盘也没有被加密。Windows 11 的自动设备加密需要开启安全启动才能把密钥交给 TPM，关闭安全启动后会尝试失败并弹窗。不想再看到可以关闭自动加密（管理员终端）：
@@ -151,6 +177,15 @@ OpenCore 默认**不显示启动菜单**，开机和原来一样直接进 Window
 | 240W 及以下 | 不建议使用 |
 
 整机持续超出适配器功率时，会由电池补电；超出过多会触发保护直接断电黑屏。
+
+**开机停在黑色的 OpenCore 菜单（Choose the Operating System）？**
+正常情况下菜单不会出现；出现说明 OpenCore 自动启动默认项失败了。常见原因：
+1. **BitLocker / 设备加密没关**（最常见）→ 先在菜单里选 **Windows** 进系统，关闭 BitLocker 并等解密完成，再运行 `setup.bat`。
+2. **默认项选错**：电脑上有第二块硬盘、U 盘或厂商分区（菜单里会多出 `SYSTEM`、`EFI` 等项），OpenCore 选中了它。先选 **Windows** 进系统，解压**最新版**后重新运行 `setup.bat`（v1.4 起会把 Windows Boot Manager 排在 OpenCore 之后，作为默认项）。
+3. **用的是 v1.1**：那一版本来就显示菜单，请换最新版。
+4. 开机时按住了 Esc。
+
+仍然出现：运行 `diag.bat`，把 `diag.txt` 和菜单照片发到 Issue。
 
 **以前在 OpenCore 菜单按过 Ctrl+Enter，现在补丁时有时无？**
 旧版允许在菜单里“设为默认”，会在固件里新建一个直连 Windows 的启动项并排到第一，导致之后开机绕过 OpenCore。v1.3 已关闭此功能；已受影响的电脑重新运行一次 `setup.bat`，按提示设为永久即可恢复。
@@ -177,7 +212,7 @@ oc.ps1                全部逻辑（setup / check / install / verify / permanen
 
 ## English (short)
 
-Unlocks NVIDIA Dynamic Boost under full CPU load on any Dynamic Boost 2.0 (NVPCF) gaming laptop by patching the NVPCF `_DSM` TPP (total CPU+GPU power budget) value via OpenCore ACPI patch at boot. No driver rollback, no test-signing, no BIOS flashing. Requires Secure Boot off. A System Restore point is created before any change (install aborts if it fails). Run `0_check.bat` first. Use at your own risk. If it helps, please leave a ⭐!
+Unlocks NVIDIA Dynamic Boost under full CPU load on any Dynamic Boost 2.0 (NVPCF) gaming laptop by patching the NVPCF `_DSM` TPP (total CPU+GPU power budget) value via OpenCore ACPI patch at boot. No driver rollback, no test-signing, no BIOS flashing. Requires Secure Boot off, or the optional Secure Boot mode (sign OpenCore with your own per-PC key and append its certificate to the firmware db). BitLocker must be off. A System Restore point is created before any change (install aborts if it fails). Run `0_check.bat` first. Use at your own risk. If it helps, please leave a ⭐!
 
 ## 致谢 / 许可
 
@@ -197,6 +232,7 @@ Unlocks NVIDIA Dynamic Boost under full CPU load on any Dynamic Boost 2.0 (NVPCF
 
 ## 更新日志
 
+- **v1.4**：修复部分电脑开机停在 OpenCore 菜单（安装时把 Windows Boot Manager 排在 OpenCore 之后，保证默认启动项正确）；BitLocker / 设备加密开启时拒绝安装；支持按性能模式写了多处 TPP 的 BIOS（如部分机械革命 AMD 机型，所有赋值须在同一个 NVPCF 方法内）；新增实验性的安全启动模式 `5_secure_boot.bat`。
 - **v1.3**：README 新增 BitLocker 弹窗说明与适配器功率建议；修复在 OpenCore 菜单按 Ctrl+Enter 会在固件中新建直连 Windows 的启动项并排到第一、导致之后开机绕过补丁的问题（关闭 `AllowSetDefault`）；新增一键安装向导 `setup.bat`（自动提权、检查、安装、重启后自动验证并询问设为永久）；`9_uninstall.bat` 同时清理向导的计划任务。原有分步脚本保留。
 - **v1.2**：开机不再显示 OpenCore 菜单和倒计时，直接进入 Windows（需要时开机按住 Esc 调出菜单）。已安装旧版的用户：解压新版后以管理员身份运行 `1_install_test.bat` 即可更新配置，无需重新设为永久。
 - **v1.1**：品牌通用；新增显卡/CPU 适用范围；安装与设为永久前自动创建并校验系统还原点，失败时列出风险并可输入 `YES` 强制继续（风险自负）；README 新增完整恢复指南；TPP 由 128W 提高到 256W（覆盖 CPU/显卡双 175W）；补丁改为掩码匹配，不再依赖特定厂商的变量名（支持 `TPPA = <任意变量>` 和 `TPPA = <常数>`）；`0_check` 额外校验 TPPA 是否为 NVPCF 表偏移 0x19 的 TPP 字段；新增 `4_export_acpi.bat` 和 Issue 模板；扫描范围扩大到 DSDT。

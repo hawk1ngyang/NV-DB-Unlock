@@ -1,5 +1,5 @@
 ﻿param([string]$Action)
-# NV-DB-Unlock v1.3 - https://github.com/hawk1ngyang/NV-DB-Unlock
+# NV-DB-Unlock v1.4 - https://github.com/hawk1ngyang/NV-DB-Unlock
 # All messages ASCII on purpose (cmd/PowerShell 5.1 codepage safety).
 $ErrorActionPreference = 'Continue'
 $dir      = Split-Path -Parent $MyInvocation.MyCommand.Path
@@ -63,6 +63,27 @@ function Confirm-NoRestorePoint([string]$step) {
 
 # Robust boolean result: PowerShell functions return every uncaptured output; take only the last value.
 function Ok($x) { $a = @($x); return ($a.Count -gt 0 -and $a[-1] -eq $true) }
+# ---- Secure Boot mode support ----
+# OK to proceed if Secure Boot is off, OR (on AND EFI\OC\keys\ISK.cer is enrolled in the firmware db).
+function Test-SecureBootReady {
+  $on = $false
+  try { $on = [bool](Confirm-SecureBootUEFI) } catch { $on = $false }
+  if (-not $on) { return 'off' }
+  $cer = Join-Path $dir 'EFI\OC\keys\ISK.cer'
+  if (-not (Test-Path $cer)) { return 'on-unsigned' }
+  try {
+    $db = (Get-SecureBootUEFI -Name db).Bytes
+    $c  = [IO.File]::ReadAllBytes($cer)
+    $hay = $latin1.GetString($db); $needle = $latin1.GetString($c)
+    if ($hay.Contains($needle)) { return 'on-enrolled' }
+  } catch {}
+  return 'on-not-enrolled'
+}
+
+function Test-BitLockerOn {
+  try { $v = Get-CimInstance -Namespace 'root\cimv2\security\microsoftvolumeencryption' -ClassName Win32_EncryptableVolume -Filter "DriveLetter='$($env:SystemDrive)'" -ErrorAction Stop
+        return ($v -and $v.ProtectionStatus -eq 1) } catch { return $false }
+}
 function Test-Admin { ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator) }
 function Mount-Esp { mountvol S: /D 2>$null | Out-Null; mountvol S: /S; if (-not (Test-Path 'S:\EFI')) { throw 'Mount EFI partition failed' } }
 function Unmount-Esp { mountvol S: /D 2>$null | Out-Null }
@@ -70,6 +91,21 @@ function Is-NameChar([byte]$c, [bool]$first) {
   if ($c -eq 0x5F -or ($c -ge 0x41 -and $c -le 0x5A)) { return $true }
   if (-not $first -and $c -ge 0x30 -and $c -le 0x39) { return $true }
   return $false
+}
+
+# Find the AML Method (opcode 0x14 + PkgLength + NameString) that encloses byte offset $pos. Returns @(start,end) or $null.
+function Get-MethodRange([byte[]]$b, [int]$pos) {
+  $lo = [Math]::Max(0, $pos - 0x10000)
+  for ($k = $pos - 1; $k -ge $lo; $k--) {
+    if ($b[$k] -ne 0x14 -or $k + 6 -ge $b.Length) { continue }
+    $lead = $b[$k+1]; $n = $lead -shr 6
+    if ($n -eq 0) { $len = $lead -band 0x3F } else { $len = $lead -band 0x0F; for ($j = 0; $j -lt $n; $j++) { $len = $len -bor ([int]$b[$k+2+$j] -shl (4 + 8*$j)) } }
+    $end = $k + 1 + $len; $q = $k + 2 + $n
+    while ($q -lt $b.Length -and ($b[$q] -eq 0x5C -or $b[$q] -eq 0x5E)) { $q++ }
+    if ($q + 3 -ge $b.Length) { continue }
+    if ($end -gt $pos -and $end -le $b.Length -and (Is-NameChar $b[$q] $true) -and (Is-NameChar $b[$q+1] $false) -and (Is-NameChar $b[$q+2] $false) -and (Is-NameChar $b[$q+3] $false)) { return ,@($k, $end) }
+  }
+  return $null
 }
 
 function Dump-Acpi([string]$target) {
@@ -87,7 +123,8 @@ function Dump-Acpi([string]$target) {
 function Scan-Acpi {
   $v = Join-Path $dir 'scan'
   Dump-Acpi $v
-  $r = @{ Name = 0; Word = 0; Patched = 0; Field = 0; Npcf = $false; Lines = @() }
+  $r = @{ Name = 0; Word = 0; Patched = 0; Field = 0; Npcf = $false; Lines = @(); SameMethod = $false }
+  $stores = @(); $fields = @()
   foreach ($f in Get-ChildItem "$v\*.dat") {
     $b = [IO.File]::ReadAllBytes($f.FullName)
     if ($b.Length -lt 36) { continue }
@@ -103,9 +140,20 @@ function Scan-Acpi {
       elseif ($i -ge 4 -and $b[$i-4] -eq 0x70 -and $b[$i-3] -eq 0x0B) { $r.Word++; $kind = ('const 0x{0:X2}{1:X2}' -f $b[$i-1], $b[$i-2]) }
       elseif ($i -ge 5 -and $b[$i-5] -eq 0x70 -and (Is-NameChar $b[$i-4] $true) -and (Is-NameChar $b[$i-3] $false) -and (Is-NameChar $b[$i-2] $false) -and (Is-NameChar $b[$i-1] $false)) { $r.Name++; $kind = 'from ' + $latin1.GetString($b, $i-4, 4) }
       elseif ($i -ge 7 -and $b[$i-1] -eq 0x19 -and $b[$i-2] -eq 0x0A -and $b[$i-7] -eq 0x8B) { $r.Field++; $kind = 'field @0x19' }
+      if ($kind -and $kind -eq 'field @0x19') { $fields += ,@($f.Name, (Get-MethodRange $b $i)) }
+      elseif ($kind -and $kind -notlike 'patched*') { $stores += ,@($f.Name, $i) }
       if ($kind) { $r.Lines += "  TPPA ($kind) at 0x$('{0:X}' -f $i) in $($f.Name) [$id]" }
       $i = $s.IndexOf('TPPA', $i + 4, [StringComparison]::Ordinal)
     }
+  }
+  # Several stores are accepted only if there is exactly ONE TPPA field (offset 0x19) and every store sits
+  # inside the same AML method as that field (e.g. one branch per performance mode in the NVPCF _DSM).
+  if ($fields.Count -eq 1 -and $fields[0][1] -and $stores.Count -ge 1) {
+    $ok = $true
+    foreach ($st in $stores) {
+      if ($st[0] -ne $fields[0][0] -or $st[1] -lt $fields[0][1][0] -or $st[1] -ge $fields[0][1][1]) { $ok = $false }
+    }
+    $r.SameMethod = $ok
   }
   Remove-Item $v -Recurse -Force -ErrorAction SilentlyContinue
   $r.Patchable = $r.Name + $r.Word
@@ -114,9 +162,11 @@ function Scan-Acpi {
 
 function Show-Check($s) {
   $s.Lines | ForEach-Object { Write-Host $_ }
-  if ($s.Patched -gt 0) { Write-Host 'ALREADY PATCHED (this boot went through OpenCore).' -ForegroundColor Green; return 'patched' }
+  if ($s.Patched -gt 0 -and $s.Patchable -gt 0) { Write-Host "PARTIALLY PATCHED: $($s.Patched) patched, $($s.Patchable) not. Run diag.bat and open an issue." -ForegroundColor Yellow; return 'unsure' }
+  if ($s.Patched -gt 0) { Write-Host "ALREADY PATCHED (this boot went through OpenCore, $($s.Patched) store(s))." -ForegroundColor Green; return 'patched' }
   if (-not $s.Npcf) { Write-Host 'NOT COMPATIBLE: no NVPCF device (NVDA0820). This laptop has no Dynamic Boost 2.0.' -ForegroundColor Red; return 'no' }
   if ($s.Patchable -eq 1 -and $s.Field -ge 1) { Write-Host 'COMPATIBLE: NVPCF TPP store found exactly once. Safe to install.' -ForegroundColor Green; return 'ok' }
+  if ($s.Patchable -gt 1 -and $s.Field -eq 1 -and $s.SameMethod) { Write-Host "COMPATIBLE: $($s.Patchable) TPP stores (one per power mode), all inside the NVPCF method of the single TPP field. All will be set to 256W. Safe to install." -ForegroundColor Green; return 'ok' }
   if ($s.Patchable -gt 1) { Write-Host "UNSURE: $($s.Patchable) candidate stores found. Do NOT install. Run 4_export_acpi.bat and open an issue." -ForegroundColor Yellow; return 'unsure' }
   Write-Host 'NOT SUPPORTED YET: NVPCF exists but the BIOS code is written differently.' -ForegroundColor Yellow
   Write-Host 'Run 4_export_acpi.bat and attach the zip to a GitHub issue so a patch can be made for your model.' -ForegroundColor Yellow
@@ -125,7 +175,10 @@ function Show-Check($s) {
 
 function Invoke-Install {
   if (-not (Test-Admin)) { Write-Host 'ERROR: right-click the .bat -> Run as administrator' -ForegroundColor Red; return $false }
-  try { if (Confirm-SecureBootUEFI) { Write-Host 'ERROR: Secure Boot is ON. Disable it in BIOS first.' -ForegroundColor Red; return $false } } catch {}
+  if (Test-BitLockerOn) { Write-Host 'ERROR: BitLocker / Device Encryption is ON for the system drive. Changing the boot path would trigger the BitLocker recovery screen. Turn it off first (Settings > Privacy & security > Device encryption, or Control Panel > BitLocker > Turn off), wait until decryption finishes, then run again.' -ForegroundColor Red; return $false }
+  $sb = Test-SecureBootReady
+  if ($sb -eq 'on-unsigned' -or $sb -eq 'on-not-enrolled') { Write-Host 'ERROR: Secure Boot is ON but the OpenCore signing certificate is not enrolled in the firmware db. Disable Secure Boot, or run 5_secure_boot.bat and enroll EFI\OC\keys\ISK.cer (see README: Secure Boot mode).' -ForegroundColor Red; return $false }
+  if ($sb -eq 'on-enrolled') { Write-Host '      Secure Boot ON with enrolled NV-DB-Unlock key: OK' -ForegroundColor Green }
   $c = Show-Check (Scan-Acpi)
   if ($c -ne 'ok' -and $c -ne 'patched') { Write-Host 'Aborted, nothing changed.' -ForegroundColor Red; return $false }
   Write-Host '[0/4] System Restore point (mandatory) + BCD backup'
@@ -150,10 +203,53 @@ function Invoke-Install {
     Set-Content -Path $guidFile -Value $g
   }
   bcdedit /set $g path '\EFI\OC\OpenCore.efi' | Out-Null
+  # OpenCore boots the first valid entry of the firmware BootOrder (skipping itself). Make sure that is Windows Boot Manager,
+  # otherwise OpenCore may pick another disk / USB / vendor entry, fail, and show its black menu.
+  bcdedit /set '{fwbootmgr}' displayorder '{bootmgr}' /addfirst | Out-Null
   bcdedit /set '{fwbootmgr}' bootsequence $g | Out-Null
   if (((bcdedit /enum '{fwbootmgr}') -join "`n") -match [regex]::Escape($g)) { Write-Host "      entry $g set as next boot" -ForegroundColor Green } else { Write-Host 'ERROR: bootsequence not set' -ForegroundColor Red; return $false }
   Write-Host '[4/4] DONE. Reboot now. Boot goes through OpenCore silently (hold Esc at power-on to show its menu).' -ForegroundColor Green
   Write-Host '      If it hangs: hold power button, power on again -> normal boot.'
+  return $true
+}
+
+# Optional Secure Boot mode: create a PER-MACHINE signing key (non-exportable, kept in the Windows cert store),
+# sign OpenCore.efi with it and export the public certificate for the user to append to the firmware db.
+function Invoke-SecureSign {
+  if (-not (Test-Admin)) { Write-Host 'ERROR: Run as administrator' -ForegroundColor Red; return $false }
+  $efi = Join-Path $dir 'EFI\OC\OpenCore.efi'
+  $kd  = Join-Path $dir 'EFI\OC\keys'; New-Item -ItemType Directory -Force -Path $kd | Out-Null
+  $tpFile = Join-Path $kd 'thumbprint.txt'; $cer = Join-Path $kd 'ISK.cer'
+  $cert = $null
+  if (Test-Path $tpFile) { $tp = (Get-Content $tpFile -Raw).Trim(); $cert = Get-Item ('Cert:\LocalMachine\My\' + $tp) -ErrorAction SilentlyContinue }
+  if (-not $cert) {
+    Write-Host '[1/4] Creating your personal signing key (RSA-2048, stays on this PC, cannot be exported)'
+    $cert = New-SelfSignedCertificate -Subject ('CN=NV-DB-Unlock ISK (' + $env:COMPUTERNAME + ')') -Type CodeSigningCert `
+      -KeyAlgorithm RSA -KeyLength 2048 -HashAlgorithm SHA256 -KeyExportPolicy NonExportable `
+      -CertStoreLocation 'Cert:\LocalMachine\My' -NotAfter (Get-Date).AddYears(20)
+    if (-not $cert) { Write-Host 'ERROR: key creation failed' -ForegroundColor Red; return $false }
+    Set-Content -Path $tpFile -Value $cert.Thumbprint
+  } else { Write-Host '[1/4] Reusing your existing signing key' }
+  Write-Host ('      key: ' + $cert.Subject + '  thumbprint ' + $cert.Thumbprint)
+  Write-Host '[2/4] Signing OpenCore.efi'
+  $tmp = Join-Path $env:TEMP 'nvdb_oc_sign.exe'   # .exe name so Windows picks the PE signer
+  Copy-Item $efi $tmp -Force
+  Set-AuthenticodeSignature -FilePath $tmp -Certificate $cert -HashAlgorithm SHA256 | Out-Null
+  $sig = Get-AuthenticodeSignature -FilePath $tmp
+  if (-not $sig.SignerCertificate -or $sig.SignerCertificate.Thumbprint -ne $cert.Thumbprint) { Write-Host 'ERROR: signing failed' -ForegroundColor Red; Remove-Item $tmp -Force; return $false }
+  Copy-Item $tmp $efi -Force; Remove-Item $tmp -Force
+  Write-Host '      OK' -ForegroundColor Green
+  Write-Host '[3/4] Exporting public certificate EFI\OC\keys\ISK.cer'
+  Export-Certificate -Cert $cert -FilePath $cer -Type CERT | Out-Null
+  Write-Host '[4/4] Updating EFI partition (if OpenCore is installed)'
+  try { Mount-Esp; if (Test-Path 'S:\EFI\OC') { robocopy (Join-Path $dir 'EFI\OC') 'S:\EFI\OC' /E /NFL /NDL /NJH /NJS | Out-Null; Write-Host '      EFI partition updated' } else { Write-Host '      not installed yet - run setup.bat (with Secure Boot still OFF) next' } } catch { Write-Host ('      ' + $_) }
+  Unmount-Esp
+  Write-Host ''
+  Write-Host 'NEXT (in BIOS, see README "Secure Boot mode"):' -ForegroundColor Cyan
+  Write-Host '  1. Copy EFI\OC\keys\ISK.cer to a FAT32 USB stick.'
+  Write-Host '  2. BIOS > Secure Boot > Key Management > Authorized Signatures (db) > APPEND > ISK.cer'
+  Write-Host '     (APPEND only! Never Set/Update/Delete.)'
+  Write-Host '  3. Secure Boot Control = Enabled, save (F10). Then run 0_check: expect "Secure Boot: on-enrolled".'
   return $true
 }
 
@@ -165,6 +261,7 @@ function Invoke-Permanent {
     if (-not (Confirm-NoRestorePoint 'make permanent')) { Write-Host 'Aborted, nothing changed.' -ForegroundColor Red; return $false }
   }
   $g = (Get-Content $guidFile -Raw).Trim()
+  bcdedit /set '{fwbootmgr}' displayorder '{bootmgr}' /addfirst | Out-Null   # Windows Boot Manager right after OpenCore
   bcdedit /set '{fwbootmgr}' displayorder $g /addfirst | Out-Null
   Write-Host 'OpenCore is now the default boot entry.' -ForegroundColor Green
   return $true
@@ -193,8 +290,9 @@ function Register-Continue {
 function Unregister-Continue { Unregister-ScheduledTask -TaskName $TaskName -Confirm:$false -ErrorAction SilentlyContinue }
 
 switch ($Action) {
- 'check' { Show-Check (Scan-Acpi) | Out-Null }
+ 'check' { Show-Check (Scan-Acpi) | Out-Null; Write-Host ('Secure Boot: ' + (Test-SecureBootReady)); Write-Host ('BitLocker on system drive: ' + $(if (Test-BitLockerOn) {'ON (turn off before install)'} else {'off'})) }
  'install' { Invoke-Install | Out-Null }
+ 'securesign' { Invoke-SecureSign | Out-Null }
  'setup' {
   if (-not (Test-Admin)) { Write-Host 'ERROR: run setup.bat (it asks for administrator rights itself)' -ForegroundColor Red; break }
   Write-Host '===== NV-DB-Unlock 一键安装向导 =====' -ForegroundColor Cyan
@@ -295,5 +393,5 @@ switch ($Action) {
   } *>&1 | Out-File -FilePath $out -Encoding utf8
   Write-Host "Saved: $out" -ForegroundColor Green
  }
- default { Write-Host 'Usage: oc.ps1 setup|check|install|verify|permanent|uninstall|export|diag' }
+ default { Write-Host 'Usage: oc.ps1 setup|check|install|verify|permanent|securesign|uninstall|export|diag' }
 }
