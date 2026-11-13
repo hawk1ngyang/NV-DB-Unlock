@@ -86,6 +86,19 @@ CPU 实际功耗仍由厂商控制软件的 PL1/PL2、温度墙和适配器决�
 
 ## 使用
 
+### 推荐：一键安装向导
+
+下载 Release 的 zip，解压到一个固定位置（之后不要删除），**双击 `setup.bat`**：
+
+1. 自动申请管理员权限，检查兼容性
+2. 确认后自动：创建还原点 → 备份启动配置 → 安装 OpenCore（仅下一次启动生效）→ 询问是否重启
+3. 重启登录后**自动弹出验证结果**；确认生效后询问是否设为永久，选 Y 即全部完成
+
+已安装过的电脑再次运行 `setup.bat`，会显示当前状态（已生效 / 未设为永久等）并给出对应操作。
+
+### 手动分步
+
+
 下载 Release 的 zip，解压到一个固定位置（路径不要含中文更稳）。
 
 | 步骤 | 文件 | 运行方式 | 说明 |
@@ -123,6 +136,28 @@ OpenCore 默认**不显示启动菜单**，开机和原来一样直接进 Window
 **会影响三角洲 / 瓦罗兰特等反作弊吗？**
 不开测试签名，Windows 看到的就是“原厂”ACPI 表。但需要关闭安全启动——要求安全启动的游戏（如部分 Vanguard / Battlefield 6 等）无法使用本方案。
 
+**弹出“BitLocker 无法启用 / 无法获取加密密钥”？**
+正常现象，不影响使用，C 盘也没有被加密。Windows 11 的自动设备加密需要开启安全启动才能把密钥交给 TPM，关闭安全启动后会尝试失败并弹窗。不想再看到可以关闭自动加密（管理员终端）：
+`reg add "HKLM\SYSTEM\CurrentControlSet\Control\BitLocker" /v PreventDeviceEncryption /t REG_DWORD /d 1 /f`
+注意：本方案与 BitLocker 加密不能同时使用。
+
+**适配器功率够吗？（重要）**
+原厂 TPP 预算的作用之一，是让整机功耗不超过电源适配器的供电能力。补丁把预算放宽到 256W 后，双烤时整机功耗 ≈ CPU + 显卡 + 其他部件约 35W：
+
+| 适配器 | 建议 |
+|---|---|
+| 330W 及以上 | 可以使用 |
+| 280W 左右 | 双烤可能超出适配器能力，出现电量下降甚至瞬间黑屏，建议在厂商软件里限制 CPU 功耗，或暂不使用 |
+| 240W 及以下 | 不建议使用 |
+
+整机持续超出适配器功率时，会由电池补电；超出过多会触发保护直接断电黑屏。
+
+**以前在 OpenCore 菜单按过 Ctrl+Enter，现在补丁时有时无？**
+旧版允许在菜单里“设为默认”，会在固件里新建一个直连 Windows 的启动项并排到第一，导致之后开机绕过 OpenCore。v1.3 已关闭此功能；已受影响的电脑重新运行一次 `setup.bat`，按提示设为永久即可恢复。
+
+**不要刷改 VBIOS / 不要单独换 NVPCF**
+刷“无上限功耗”的显卡固件会让显卡超过出厂上限，可能超出适配器和散热能力，且有变砖、失去保修的风险；单独换旧版 NVPCF 会让新驱动下的 DB 完全失效。本项目不需要也不建议这两种操作。
+
 **更新显卡驱动会失效吗？** 不会，补丁在 ACPI 层，与驱动无关。
 
 **更新 BIOS 会怎样？** 如果新 BIOS 改了这段代码，补丁不会匹配（不会出错，只是不生效）。更新后运行 `2_verify.bat` 确认。
@@ -135,7 +170,8 @@ OpenCore 默认**不显示启动菜单**，开机和原来一样直接进 Window
 EFI/OC/OpenCore.efi   OpenCore 1.0.8 RELEASE（官方原版，未修改）
 EFI/OC/config.plist   仅含两条 TPP ACPI Patch 的最小配置（已通过 ocvalidate）
 tools/acpidump.exe    Intel ACPICA 官方工具，用于检查/验证
-oc.ps1                全部逻辑（check / install / verify / permanent / uninstall / export / diag）
+setup.bat             一键安装向导（推荐）
+oc.ps1                全部逻辑（setup / check / install / verify / permanent / uninstall / export / diag）
 *.bat                 双击入口
 ```
 
@@ -161,6 +197,7 @@ Unlocks NVIDIA Dynamic Boost under full CPU load on any Dynamic Boost 2.0 (NVPCF
 
 ## 更新日志
 
+- **v1.3**：README 新增 BitLocker 弹窗说明与适配器功率建议；修复在 OpenCore 菜单按 Ctrl+Enter 会在固件中新建直连 Windows 的启动项并排到第一、导致之后开机绕过补丁的问题（关闭 `AllowSetDefault`）；新增一键安装向导 `setup.bat`（自动提权、检查、安装、重启后自动验证并询问设为永久）；`9_uninstall.bat` 同时清理向导的计划任务。原有分步脚本保留。
 - **v1.2**：开机不再显示 OpenCore 菜单和倒计时，直接进入 Windows（需要时开机按住 Esc 调出菜单）。已安装旧版的用户：解压新版后以管理员身份运行 `1_install_test.bat` 即可更新配置，无需重新设为永久。
 - **v1.1**：品牌通用；新增显卡/CPU 适用范围；安装与设为永久前自动创建并校验系统还原点，失败时列出风险并可输入 `YES` 强制继续（风险自负）；README 新增完整恢复指南；TPP 由 128W 提高到 256W（覆盖 CPU/显卡双 175W）；补丁改为掩码匹配，不再依赖特定厂商的变量名（支持 `TPPA = <任意变量>` 和 `TPPA = <常数>`）；`0_check` 额外校验 TPPA 是否为 NVPCF 表偏移 0x19 的 TPP 字段；新增 `4_export_acpi.bat` 和 Issue 模板；扫描范围扩大到 DSDT。
 - **v1.0**：首个版本。
