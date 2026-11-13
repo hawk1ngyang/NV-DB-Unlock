@@ -143,8 +143,11 @@ OpenCore 默认**不显示启动菜单**，开机和原来一样直接进 Window
    - 在本机生成一把**只属于这台电脑**的签名密钥（RSA-2048，存放在 Windows 证书存储中，**不可导出**，不会生成任何私钥文件）；
    - 用它给 `OpenCore.efi` 签名，并同步到 EFI 分区；
    - 导出公钥证书 `EFI\OC\keys\ISK.cer`。
-3. 把 `ISK.cer` 复制到一个 **FAT32 U 盘**。
-4. 重启进 BIOS → Secure Boot → **Key Management** → **Authorized Signatures (db)** → **Append（追加）** → 选 U 盘里的 `ISK.cer`（格式选 Public Key Certificate）。
+3. 打开**解压出来的文件夹** → `EFI` → `OC` → `keys`，把里面的 `ISK.cer` 复制到一个 **FAT32 格式的 U 盘**根目录。
+4. 插着 U 盘重启进 BIOS（常见 F2 / Del，华硕先按 F7 进高级模式）→ Security / Boot 里找到 **Secure Boot**：
+   - 如果有 **Secure Boot Mode**，先从 Standard 改成 **Custom**，下面的 **Key Management** 才能操作；
+   - 进入 **Key Management** → **Authorized Signatures (db)**（也可能叫 `db`、`Allowed Signatures`）→ **Append（追加）** → 选 U 盘 → `ISK.cer` → 格式选 **Public Key Certificate**（如有询问）→ 确认。
+   - 各品牌 BIOS 菜单名称不同；**找不到添加证书的选项，说明这台电脑不支持安全启动模式**，保持安全启动关闭使用即可。
    > ⚠️ **只能选 Append / 追加**。选 Set / Update / Delete 会覆盖微软证书，导致 Windows 无法启动。
    > 如果 Key Management 里显示没有任何密钥（Setup Mode），先选 **Install Default Secure Boot Keys** 再追加。
 5. **Secure Boot Control → Enabled**，F10 保存重启。
