@@ -1,5 +1,5 @@
 ﻿param([string]$Action)
-# NV-DB-Unlock v1.1 - https://github.com/hawk1ngyang/NV-DB-Unlock
+# NV-DB-Unlock v1.2 - https://github.com/hawk1ngyang/NV-DB-Unlock
 # All messages ASCII on purpose (cmd/PowerShell 5.1 codepage safety).
 $ErrorActionPreference = 'Continue'
 $dir      = Split-Path -Parent $MyInvocation.MyCommand.Path
@@ -152,7 +152,7 @@ switch ($Action) {
   bcdedit /set $g path '\EFI\OC\OpenCore.efi' | Out-Null
   bcdedit /set '{fwbootmgr}' bootsequence $g | Out-Null
   if (((bcdedit /enum '{fwbootmgr}') -join "`n") -match [regex]::Escape($g)) { Write-Host "      entry $g set as next boot" -ForegroundColor Green } else { Write-Host 'ERROR: bootsequence not set' -ForegroundColor Red; break }
-  Write-Host '[4/4] DONE. Reboot now. OpenCore menu shows, Windows starts in 3s.' -ForegroundColor Green
+  Write-Host '[4/4] DONE. Reboot now. Boot goes through OpenCore silently (hold Esc at power-on to show its menu).' -ForegroundColor Green
   Write-Host '      If it hangs: hold power button, power on again -> normal boot.'
  }
  'verify' {

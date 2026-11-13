@@ -92,13 +92,15 @@ CPU 实际功耗仍由厂商控制软件的 PL1/PL2、温度墙和适配器决�
 |---|---|---|---|
 | 0 | `0_check.bat` | 双击 | 检查你的 BIOS 是否兼容。显示 `COMPATIBLE` 才继续 |
 | 1 | `1_install_test.bat` | **右键 → 以管理员身份运行** | 先创建系统还原点（失败时可选择取消或输入 `YES` 风险自负继续）并备份启动配置，然后把 OpenCore 放进 EFI 分区，设为**仅下一次**启动 |
-| 2 | 重启 → `2_verify.bat` | 双击 | 出现 OpenCore 菜单，3 秒后自动进 Windows。验证显示 `PATCHED` 即生效 |
+| 2 | 重启 → `2_verify.bat` | 双击 | 开机经过 OpenCore（不显示菜单，直接进 Windows）。验证显示 `PATCHED` 即生效 |
 | 3 | 双烤测试 | — | 切到厂商控制软件的最高性能模式，FurMark + AIDA64 FPU，看显卡功耗 |
 | 4 | `3_make_permanent.bat` | **管理员** | 再建一个还原点后，设为永久默认启动 |
 | 适配 | `4_export_acpi.bat` | 双击 | 不兼容时导出 ACPI 表，用于提 Issue |
 | 卸载 | `9_uninstall.bat` | **管理员** | 删除 OpenCore 与启动项，恢复原厂启动 |
 
 第 1 步只生效一次：如果重启时卡住/黑屏，**长按电源键关机再开机**即回到原来的启动，什么都不会变。
+
+OpenCore 默认**不显示启动菜单**，开机和原来一样直接进 Windows。需要看菜单时，开机时**按住 Esc** 即可调出。
 
 ## 出问题怎么恢复
 
@@ -107,7 +109,7 @@ CPU 实际功耗仍由厂商控制软件的 PL1/PL2、温度墙和适配器决�
 | 情况 | 恢复方法 |
 |---|---|
 | 测试启动（第 1 步后）卡住/黑屏 | 长按电源键关机 → 再开机，自动回到原来的启动 |
-| 设为永久后开机卡在 OpenCore | 开机时按**启动菜单键**（常见 Esc / F8 / F9 / F11 / F12，以你的机型为准）→ 选 **Windows Boot Manager** 进系统 → 管理员运行 `9_uninstall.bat` |
+| 设为永久后开机卡住 | 开机时按**启动菜单键**（常见 Esc / F8 / F9 / F11 / F12，以你的机型为准）→ 选 **Windows Boot Manager** 进系统 → 管理员运行 `9_uninstall.bat` |
 | 能进 Windows，但想彻底撤销 | 管理员运行 `9_uninstall.bat`（删除 OpenCore 与启动项，恢复 Windows 为第一启动项）；仍不正常时按提示执行 `bcdedit /import bcd_backup` 还原完整启动配置 |
 | 系统出现其他异常 | 开始菜单搜索“创建还原点” → **系统还原** → 选择 `Before NV-DB-Unlock install` |
 | Windows 完全进不去 | 连续 3 次开机时强制关机进入 **Windows 恢复环境** → 疑难解答 → 高级选项 → **系统还原**（选上面的还原点）；或在“命令提示符”中执行 `bcdboot C:\Windows` 重建启动项 |
@@ -159,5 +161,6 @@ Unlocks NVIDIA Dynamic Boost under full CPU load on any Dynamic Boost 2.0 (NVPCF
 
 ## 更新日志
 
+- **v1.2**：开机不再显示 OpenCore 菜单和倒计时，直接进入 Windows（需要时开机按住 Esc 调出菜单）。已安装旧版的用户：解压新版后以管理员身份运行 `1_install_test.bat` 即可更新配置，无需重新设为永久。
 - **v1.1**：品牌通用；新增显卡/CPU 适用范围；安装与设为永久前自动创建并校验系统还原点，失败时列出风险并可输入 `YES` 强制继续（风险自负）；README 新增完整恢复指南；TPP 由 128W 提高到 256W（覆盖 CPU/显卡双 175W）；补丁改为掩码匹配，不再依赖特定厂商的变量名（支持 `TPPA = <任意变量>` 和 `TPPA = <常数>`）；`0_check` 额外校验 TPPA 是否为 NVPCF 表偏移 0x19 的 TPP 字段；新增 `4_export_acpi.bat` 和 Issue 模板；扫描范围扩大到 DSDT。
 - **v1.0**：首个版本。
