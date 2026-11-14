@@ -142,11 +142,16 @@ OpenCore 默认**不显示启动菜单**，开机和原来一样直接进 Window
 2. 运行 `5_secure_boot.bat`（自动请求管理员）。它会：
    - 在本机生成一把**只属于这台电脑**的签名密钥（RSA-2048，存放在 Windows 证书存储中，**不可导出**，不会生成任何私钥文件）；
    - 用它给 `OpenCore.efi` 签名，并同步到 EFI 分区；
-   - 导出公钥证书 `EFI\OC\keys\ISK.cer`。
-3. 打开**解压出来的文件夹** → `EFI` → `OC` → `keys`，把里面的 `ISK.cer` 复制到一个 **FAT32 格式的 U 盘**根目录。
+   - 导出公钥证书 `EFI\OC\keys\ISK.cer`，以及同一证书的另一种格式 `ISK.esl`。
+3. 打开**解压出来的文件夹** → `EFI` → `OC` → `keys`，把里面的 `ISK.cer` 和 `ISK.esl` 都复制到一个 **FAT32 格式的 U 盘**根目录。
 4. 插着 U 盘重启进 BIOS（常见 F2 / Del，华硕先按 F7 进高级模式）→ Security / Boot 里找到 **Secure Boot**：
    - 如果有 **Secure Boot Mode**，先从 Standard 改成 **Custom**，下面的 **Key Management** 才能操作；
    - 进入 **Key Management** → **Authorized Signatures (db)**（也可能叫 `db`、`Allowed Signatures`）→ **Append（追加）** → 选 U 盘 → `ISK.cer` → 格式选 **Public Key Certificate**（如有询问）→ 确认。
+   - 选 Append 后如果弹窗问是否加载**出厂默认（factory default）db**，选 **No**，才会让你从 U 盘选文件；选 Yes 只会重新加载默认证书。
+   - **加不进去时依次尝试**：
+     1. 确认 Secure Boot Mode 已是 **Custom**，U 盘是 **FAT32**、文件在**根目录**；
+     2. 改选 `ISK.esl`（格式选 **EFI Signature List**）；
+     3. 部分 BIOS（如 Insyde）只能“登记 EFI 文件”：选 **Enroll Signature / Enroll EFI Image / Add hash** 之类的项，直接选 EFI 分区里的 `EFI\OC\OpenCore.efi`。这种方式登记的是文件哈希，以后更新或重新签名后要再登记一次。
    - 各品牌 BIOS 菜单名称不同；**找不到添加证书的选项，说明这台电脑不支持安全启动模式**，保持安全启动关闭使用即可。
    > ⚠️ **只能选 Append / 追加**。选 Set / Update / Delete 会覆盖微软证书，导致 Windows 无法启动。
    > 如果 Key Management 里显示没有任何密钥（Setup Mode），先选 **Install Default Secure Boot Keys** 再追加。
@@ -184,11 +189,14 @@ OpenCore 默认**不显示启动菜单**，开机和原来一样直接进 Window
 整机持续超出适配器功率时，会由电池补电；超出过多会触发保护直接断电黑屏。
 
 **开机停在黑色的 OpenCore 菜单（Choose the Operating System）？**
+> 不要靠在 BIOS 里把 Windows Boot Manager 调到第一位来“解决”：这样开机会绕过 OpenCore，补丁随之失效。启动顺序第一位必须是 `OpenCore NV-DB-Unlock`。
+
 正常情况下菜单不会出现；出现说明 OpenCore 自动启动默认项失败了。常见原因：
 1. **BitLocker / 设备加密没关**（最常见）→ 先在菜单里选 **Windows** 进系统，关闭 BitLocker 并等解密完成，再运行 `setup.bat`。
-2. **默认项选错**：电脑上有第二块硬盘、U 盘或厂商分区（菜单里会多出 `SYSTEM`、`EFI` 等项），OpenCore 选中了它。先选 **Windows** 进系统，解压**最新版**后重新运行 `setup.bat`（v1.4 起会把 Windows Boot Manager 排在 OpenCore 之后，作为默认项）。
-3. **用的是 v1.1**：那一版本来就显示菜单，请换最新版。
-4. 开机时按住了 Esc。
+2. **菜单第一项是 `SYSTEM`**：那是 OpenCore 自己，旧版可能把它当成默认项。更新到 v1.4.1 即可。
+3. **默认项选错**：电脑上有第二块硬盘、U 盘或厂商分区（菜单里会多出 `EFI` 或其他磁盘名），OpenCore 选中了它。先选 **Windows** 进系统，解压**最新版**后重新运行 `setup.bat`（v1.4 起会把 Windows Boot Manager 排在 OpenCore 之后，作为默认项）。
+4. **用的是 v1.1**：那一版本来就显示菜单，请换最新版。
+5. 开机时按住了 Esc。
 
 仍然出现：运行 `diag.bat`，把 `diag.txt` 和菜单照片发到 Issue。
 
@@ -237,6 +245,7 @@ Unlocks NVIDIA Dynamic Boost under full CPU load on any Dynamic Boost 2.0 (NVPCF
 
 ## 更新日志
 
+- **v1.4.1**：修复开机出现 OpenCore 菜单、默认选中 `SYSTEM` 的问题。原因是 OpenCore 把固件启动顺序里它自己的启动项也当成了一个系统（显示为 EFI 分区的卷标 `SYSTEM`），并把它作为默认项；签名后的 OpenCore 尤其容易出现。现在在 `EFI\OC` 中放置 `.contentVisibility`（内容 `Disabled`）把它隐藏，默认项回到 Windows。已安装用户：解压新版后运行 `setup.bat`（或已开安全启动模式的运行 `5_secure_boot.bat`）即可更新。
 - **v1.4**：修复部分电脑开机停在 OpenCore 菜单（安装时把 Windows Boot Manager 排在 OpenCore 之后，保证默认启动项正确）；BitLocker / 设备加密开启时拒绝安装；支持按性能模式写了多处 TPP 的 BIOS（如部分机械革命 AMD 机型，所有赋值须在同一个 NVPCF 方法内）；新增实验性的安全启动模式 `5_secure_boot.bat`。
 - **v1.3**：README 新增 BitLocker 弹窗说明与适配器功率建议；修复在 OpenCore 菜单按 Ctrl+Enter 会在固件中新建直连 Windows 的启动项并排到第一、导致之后开机绕过补丁的问题（关闭 `AllowSetDefault`）；新增一键安装向导 `setup.bat`（自动提权、检查、安装、重启后自动验证并询问设为永久）；`9_uninstall.bat` 同时清理向导的计划任务。原有分步脚本保留。
 - **v1.2**：开机不再显示 OpenCore 菜单和倒计时，直接进入 Windows（需要时开机按住 Esc 调出菜单）。已安装旧版的用户：解压新版后以管理员身份运行 `1_install_test.bat` 即可更新配置，无需重新设为永久。

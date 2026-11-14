@@ -1,5 +1,5 @@
 ﻿param([string]$Action)
-# NV-DB-Unlock v1.4 - https://github.com/hawk1ngyang/NV-DB-Unlock
+# NV-DB-Unlock v1.4.1 - https://github.com/hawk1ngyang/NV-DB-Unlock
 # All messages ASCII on purpose (cmd/PowerShell 5.1 codepage safety).
 $ErrorActionPreference = 'Continue'
 $dir      = Split-Path -Parent $MyInvocation.MyCommand.Path
@@ -241,13 +241,20 @@ function Invoke-SecureSign {
   Write-Host '      OK' -ForegroundColor Green
   Write-Host '[3/4] Exporting public certificate EFI\OC\keys\ISK.cer'
   Export-Certificate -Cert $cert -FilePath $cer -Type CERT | Out-Null
+  # Same certificate as an EFI_SIGNATURE_LIST (ISK.esl) for BIOSes that refuse a plain .cer
+  $der = [IO.File]::ReadAllBytes($cer)
+  $ms = New-Object IO.MemoryStream; $bw = New-Object IO.BinaryWriter($ms)
+  $bw.Write(([Guid]'a5c059a1-94e4-4aa7-87b5-ab155c2bf072').ToByteArray())   # EFI_CERT_X509_GUID
+  $bw.Write([uint32](28 + 16 + $der.Length)); $bw.Write([uint32]0); $bw.Write([uint32](16 + $der.Length))
+  $bw.Write(([Guid]'4e56442d-4442-556e-6c6f-636b00000001').ToByteArray()); $bw.Write($der); $bw.Flush()
+  [IO.File]::WriteAllBytes((Join-Path $kd 'ISK.esl'), $ms.ToArray())
   Write-Host '[4/4] Updating EFI partition (if OpenCore is installed)'
   try { Mount-Esp; if (Test-Path 'S:\EFI\OC') { robocopy (Join-Path $dir 'EFI\OC') 'S:\EFI\OC' /E /NFL /NDL /NJH /NJS | Out-Null; Write-Host '      EFI partition updated' } else { Write-Host '      not installed yet - run setup.bat (with Secure Boot still OFF) next' } } catch { Write-Host ('      ' + $_) }
   Unmount-Esp
   Write-Host ''
   Write-Host 'NEXT (in BIOS, see README "Secure Boot mode"):' -ForegroundColor Cyan
-  Write-Host '  1. Copy EFI\OC\keys\ISK.cer to a FAT32 USB stick.'
-  Write-Host '  2. BIOS > Secure Boot > Key Management > Authorized Signatures (db) > APPEND > ISK.cer'
+  Write-Host '  1. Copy EFI\OC\keys\ISK.cer and ISK.esl to the root of a FAT32 USB stick.'
+  Write-Host '  2. BIOS > Secure Boot > Key Management > Authorized Signatures (db) > APPEND > ISK.cer (if refused, try ISK.esl)'
   Write-Host '     (APPEND only! Never Set/Update/Delete.)'
   Write-Host '  3. Secure Boot Control = Enabled, save (F10). Then run 0_check: expect "Secure Boot: on-enrolled".'
   return $true
